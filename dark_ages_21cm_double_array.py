@@ -425,22 +425,25 @@ fiducial_fisher.pop('tau')
 
 fisher_matrix = np.zeros((len(fiducial_fisher), len(fiducial_fisher)))
 
-for pix1, p1 in enumerate(fiducial_fisher):
-    for pix2, p2 in enumerate(fiducial_fisher):
-        entry = fisher_element(p1, p2)
-        fisher_matrix[pix1, pix2] = entry
+def run():
+    for pix1, p1 in enumerate(fiducial_fisher):
+        for pix2, p2 in enumerate(fiducial_fisher):
+            entry = fisher_element(p1, p2)
+            fisher_matrix[pix1, pix2] = entry
 
-print('Number of antennas:', N_antenna)
-print('Max baseline:', D_max)
-print('Separation L:', L)
+    cov = np.linalg.inv(fisher_matrix)
 
-cov = np.linalg.inv(fisher_matrix)
+    for pix, params in enumerate(fiducial_fisher):
+        err = np.sqrt(cov[pix, pix])
+        if params == 'As':
+            print('log(1e10 As)' + ': ', np.log(1e10 * err))
+        else:
+            print(params + ': ', err)
 
-for pix, params in enumerate(fiducial_fisher):
-    err = np.sqrt(cov[pix, pix])
-    if params == 'As':
-        print('log(1e10 As)' + ': ', np.log(1e10 * err))
-    else:
-        print(params + ': ', err)
+    ## calculate the number of independent modes 
+    N_modes = np.sum((PS_HI_2D_fid/deltaPK)**2)
 
-sigma_alpha_s = np.sqrt(cov[-1, -1])
+if __name__ == "__main__":
+    run()
+
+

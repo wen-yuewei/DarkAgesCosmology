@@ -347,88 +347,87 @@ PS_HI_2D_fid = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_fid)
 
 ##set the percentage for numerical derivative
 ##set a variation for alpha_s
-# percent = 0.05
-# alpha_s_vary = 0.05
+percent = 0.05
+alpha_s_vary = 0.05
 
-# def get_ps_vary_interp(params):
-#     fid_val = fiducial[params]
-#     if params == 'alpha_s':
-#         varied_val = alpha_s_vary
-#     else:
-#         varied_val = fid_val * (1 + percent)
+def get_ps_vary_interp(params):
+    fid_val = fiducial[params]
+    if params == 'alpha_s':
+        varied_val = alpha_s_vary
+    else:
+        varied_val = fid_val * (1 + percent)
 
-#     fisher = fiducial.copy()
-#     fisher[params] = varied_val
+    fisher = fiducial.copy()
+    fisher[params] = varied_val
 
-#     interp_lis_vary = get_HI_power_spectrum_interp(fisher, redshift)
+    interp_lis_vary = get_HI_power_spectrum_interp(fisher, redshift)
 
-#     return interp_lis_vary
+    return interp_lis_vary
 
-# ## put the P(k, p_vary) interpolator into a dictionary
-# ## each entry is a list of the three moments Pk0, Pk2, Pk4
-# Pk_interp_vary_dict = {}
+## put the P(k, p_vary) interpolator into a dictionary
+## each entry is a list of the three moments Pk0, Pk2, Pk4
+Pk_interp_vary_dict = {}
 
-# for pix, param_name in enumerate(fiducial):
-#     interp_vary = get_ps_vary_interp(param_name)
-#     Pk_interp_vary_dict[param_name] = interp_vary
+for pix, param_name in enumerate(fiducial):
+    interp_vary = get_ps_vary_interp(param_name)
+    Pk_interp_vary_dict[param_name] = interp_vary
 
 
-# def fisher_element(param1, param2):
-#     ## param1
-#     interp_lis_vary_1 = Pk_interp_vary_dict[param1]
-#     PS_vary_1 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_1)
+def fisher_element(param1, param2):
+    ## param1
+    interp_lis_vary_1 = Pk_interp_vary_dict[param1]
+    PS_vary_1 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_1)
 
-#     ## param2
-#     interp_lis_vary_2 = Pk_interp_vary_dict[param2]
-#     PS_vary_2 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_2)
+    ## param2
+    interp_lis_vary_2 = Pk_interp_vary_dict[param2]
+    PS_vary_2 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_2)
 
-#     dPk_1 = PS_vary_1 - PS_HI_2D_fid
-#     dPk_2 = PS_vary_2 - PS_HI_2D_fid
+    dPk_1 = PS_vary_1 - PS_HI_2D_fid
+    dPk_2 = PS_vary_2 - PS_HI_2D_fid
 
-#     if param1 == 'alpha_s':
-#         delta_p1 = alpha_s_vary
-#     else:
-#         delta_p1 = percent * fiducial[param1]
+    if param1 == 'alpha_s':
+        delta_p1 = alpha_s_vary
+    else:
+        delta_p1 = percent * fiducial[param1]
 
-#     if param2 == 'alpha_s':
-#         delta_p2 = alpha_s_vary
-#     else:
-#         delta_p2 = percent * fiducial[param2]
+    if param2 == 'alpha_s':
+        delta_p2 = alpha_s_vary
+    else:
+        delta_p2 = percent * fiducial[param2]
 
-#     dPk_dp_1 = dPk_1 / delta_p1
-#     dPk_dp_2 = dPk_2 / delta_p2
+    dPk_dp_1 = dPk_1 / delta_p1
+    dPk_dp_2 = dPk_2 / delta_p2
 
-#     delta_Pk_sqr = deltaPK ** 2
+    delta_Pk_sqr = deltaPK ** 2
 
-#     integrand = dPk_dp_1 * dPk_dp_2 * (1 / delta_Pk_sqr)
+    integrand = dPk_dp_1 * dPk_dp_2 * (1 / delta_Pk_sqr)
 
-#     return np.sum(integrand)
+    return np.sum(integrand)
 
-# # print(fisher_element('ombh2', 'ombh2'))
+# print(fisher_element('ombh2', 'ombh2'))
 
-# fiducial_fisher = fiducial.copy()
-# fiducial_fisher.pop('tau')
+fiducial_fisher = fiducial.copy()
+fiducial_fisher.pop('tau')
 
-# fisher_matrix = np.zeros((len(fiducial_fisher), len(fiducial_fisher)))
+fisher_matrix = np.zeros((len(fiducial_fisher), len(fiducial_fisher)))
 
-# for pix1, p1 in enumerate(fiducial_fisher):
-#     for pix2, p2 in enumerate(fiducial_fisher):
-#         entry = fisher_element(p1, p2)
-#         fisher_matrix[pix1, pix2] = entry
+def run():
+    for pix1, p1 in enumerate(fiducial_fisher):
+        for pix2, p2 in enumerate(fiducial_fisher):
+            entry = fisher_element(p1, p2)
+            fisher_matrix[pix1, pix2] = entry
 
-# print('Number of antennas:', N_antenna)
-# print('Max baseline:', D_max)
+    cov = np.linalg.inv(fisher_matrix)
 
-# cov = np.linalg.inv(fisher_matrix)
+    for pix, params in enumerate(fiducial_fisher):
+        err = np.sqrt(cov[pix, pix])
+        if params == 'As':
+            print('log(1e10 As)' + ': ', np.log(1e10 * err))
+        else:
+            print(params + ': ', err)
 
-# for pix, params in enumerate(fiducial_fisher):
-#     err = np.sqrt(cov[pix, pix])
-#     if params == 'As':
-#         print('log(1e10 As)' + ': ', np.log(1e10 * err))
-#     else:
-#         print(params + ': ', err)
+    ## calculate the number of independent modes 
+    N_modes = np.sum((PS_HI_2D_fid/deltaPK)**2)
 
-## calculate the number of independent modes 
-N_modes = np.sum((PS_HI_2D_fid/deltaPK)**2)
-print('k_max:', k_perp_max)
-
+if __name__ == "__main__":
+    run()

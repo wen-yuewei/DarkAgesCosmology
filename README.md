@@ -26,19 +26,15 @@ Authors: Yuewei Wen and Xuelei Chen
 - matplotlib
 - camb
 
-## Quick Start
+## Setup
+1. Clone/download this repository.
+2. Edit `params.ini` to set your desired parameters.
 
-Clone the repository and install dependencies:
-
+## Usage
+Run either script from the terminal:
 ```bash
-git clone https://github.com/yourusername/DarkAgesCosmology.git
-cd DarkAges
-
-python matter_power_21cm_fisher_z_single.py
-
-or
-
-python matter_power_21cm_fisher_z_double.py
+python dark_ages_21cm_single_array.py
+python dark_ages_21cm_double_array.py
 
 ## Citation
 @article{YourLastName2025,

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Unified entry point for 21cm interferometer constraints."""
 import argparse
-import sys
 
 def main():
     parser = argparse.ArgumentParser(

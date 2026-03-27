@@ -10,16 +10,19 @@
 
 ## import packages
 import numpy as np
-import matplotlib.pyplot as plt
 import camb
 from camb import model
 from scipy.interpolate import CubicSpline
 from scipy.integrate import quad, simpson
+import os
 
 ## load parameters from params.ini
 def load_parameters(ini_file='params.ini'):
+    # Get the directory where this script lives
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(script_dir, ini_file)
     params = {}
-    with open(ini_file, 'r') as f:
+    with open(full_path, 'r') as f:
         for line in f:
             # Remove everything after the first '#' (inline comment)
             if '#' in line:
@@ -435,10 +438,7 @@ def run():
 
     for pix, params in enumerate(fiducial_fisher):
         err = np.sqrt(cov[pix, pix])
-        if params == 'As':
-            print('log(1e10 As)' + ': ', np.log(1e10 * err))
-        else:
-            print(params + ': ', err)
+        print(params + ': ', err)
 
     ## calculate the number of independent modes 
     N_modes = np.sum((PS_HI_2D_fid/deltaPK)**2)

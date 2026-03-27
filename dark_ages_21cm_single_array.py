@@ -3,7 +3,7 @@
 ## no AP effect
 ## all combined into ONE power spectrum function
 ## reads in a params.ini file
-## one circular array, either FarView or circular
+## one circular array
 
 ## import packages
 import numpy as np
@@ -227,7 +227,6 @@ def noise_power_spectrum(k_perp):
     noise_coeff_3 = (1 / (N_pol * t_tot)) * (S_area / FoV) ##s^-1
     noise_coeff = T_sys ** 2 * noise_coeff_1 * noise_coeff_2 * noise_coeff_3
 
-    # nb_D = nb_D_FarView(D_val, N_antenna, D_min, D_max, D0, w)
     nb_D = nb_circular(D_val, N_antenna, D_max, D_min)
     nb_u = nb_D * wavelength ** 2
 

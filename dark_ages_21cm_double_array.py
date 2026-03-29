@@ -445,7 +445,7 @@ def run():
             ps_21_error=deltaPK,
             kperp=k_perp_vals,
             kpara=k_para_vals)
-    logging.info("Saved Fisher matrix, power spectra, and k-bins to outputs_double_array.npz")
+    logging.info("Saved Fisher matrix, power spectrum, error and k-bins to outputs_double_array.npz")
 
     cov = np.linalg.inv(fisher_matrix)
 

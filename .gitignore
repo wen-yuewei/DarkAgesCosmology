@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Logs and output files
+*.log
+*.npz   
+*.npy
+
+# Jupyter Notebook (if you use them)
+.ipynb_checkpoints/
+
+# OS generated files
+.DS_Store
+Thumbs.db

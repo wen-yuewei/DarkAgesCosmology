@@ -15,6 +15,10 @@ from camb import model
 from scipy.interpolate import CubicSpline
 from scipy.integrate import quad, simpson
 import os
+import logging
+import sys
+
+logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
 
 ## load parameters from params.ini
 def load_parameters(ini_file='params.ini'):
@@ -75,7 +79,7 @@ t_tot = t_tot * 3600 ## convert from hours to seconds
 ## design an array
 D_half_lambda = wavelength/2
 if D_min < D_half_lambda:
-    print('Warning: D_min is smaller than half wavelength')
+    logging.warning('D_min is smaller than half wavelength')
 
 ## conversions
 def z_to_freq(z):
@@ -436,12 +440,18 @@ def run():
 
     cov = np.linalg.inv(fisher_matrix)
 
+    logging.info('------------------------------------')
+    logging.info('Constraint on cosmological parameters:')
+
     for pix, params in enumerate(fiducial_fisher):
         err = np.sqrt(cov[pix, pix])
-        print(params + ': ', err)
+        logging.info(f'{params}: {err}')
 
     ## calculate the number of independent modes 
     N_modes = np.sum((PS_HI_2D_fid/deltaPK)**2)
+
+    logging.info('------------------------------------')
+    logging.info(f'Number of modes: {N_modes}')   
 
 if __name__ == "__main__":
     run()

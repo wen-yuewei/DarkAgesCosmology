@@ -424,6 +424,15 @@ def run():
             entry = fisher_element(p1, p2)
             fisher_matrix[pix1, pix2] = entry
 
+    ## same the Fisher matrix, power spectrum and error
+    np.savez('outputs_single_array.npz',
+            fisher=fisher_matrix,
+            ps_21=PS_HI_2D_fid,
+            ps_21_error=deltaPK,
+            kperp=k_perp_vals,
+            kpara=k_para_vals)
+    logging.info("Saved Fisher matrix, power spectra, and k-bins to outputs_single_array.npz")
+
     cov = np.linalg.inv(fisher_matrix)
 
     logging.info('------------------------------------')

@@ -111,6 +111,13 @@ def get_basic_cosmology(fid_dict, z):
 
 results, r_z, H_z = get_basic_cosmology(fiducial, redshift)
 
+# Store quantities for the AP effect 
+D_A_tr = r_z / (1 + redshift)
+Hz_tr = H_z
+
+D_A_fid = D_A_tr
+Hz_fid = Hz_tr
+
 ## run CAMB
 def get_HI_power_spectrum_interp(fid_dict, z, k_upper_lim=200):
     ## set the cosmology
@@ -155,7 +162,7 @@ def get_HI_power_spectrum_interp(fid_dict, z, k_upper_lim=200):
 
     return interp_lis
 
-def HI_power_spectrum_2D(k_perp, k_para, interp_lis):
+def HI_power_spectrum_2D_tr(k_perp, k_para, interp_lis):
     k = np.sqrt(k_perp ** 2 + k_para ** 2)
     mu = np.sqrt(1 - (k_perp / k) ** 2)
 
@@ -166,6 +173,41 @@ def HI_power_spectrum_2D(k_perp, k_para, interp_lis):
     PS_no_noise = Pk_0(k) + Pk_2(k) * mu ** 2 + Pk_4(k) * mu ** 4
 
     return PS_no_noise ## mK^2 Mpc^3
+
+def HI_power_spectrum_2D(k_perp_obs, k_para_obs, interp_lis_true,
+                            D_A_ratio=1.0, Hz_ratio=1.0):
+    """
+    Compute the observed 21cm power spectrum including the AP effect.
+
+    Parameters
+    ----------
+    k_perp_obs : array_like
+        Observed perpendicular wavenumber (in the fiducial cosmology)
+    k_para_obs : array_like
+        Observed parallel wavenumber (in the fiducial cosmology)
+    interp_lis_true : list of CubicSpline
+        Interpolators for the true power spectrum (monopole, dipole, quadrupole)
+    D_A_ratio : float
+        Ratio D_A_fid / D_A_true
+    Hz_ratio : float
+        Ratio H_true / H_fid
+
+    Returns
+    -------
+    array_like
+        Observed power spectrum P_obs (in mK^2 Mpc^3)
+    """
+    # Map to true k values
+    k_perp_true = D_A_ratio * k_perp_obs
+    k_para_true = Hz_ratio * k_para_obs
+
+    # Evaluate the true power spectrum at the mapped k values
+    P_true = HI_power_spectrum_2D_tr(k_perp_true, k_para_true, interp_lis_true)
+
+    # Volume scaling factor
+    volume_factor = (D_A_ratio)**2 * Hz_ratio
+
+    return P_true * volume_factor ## mK^2 Mpc^-3
 
 ## Baseline distribution
 def nb_D_FarView(D, N_ant, D_min, D_max, D0, w):
@@ -371,23 +413,52 @@ def get_ps_vary_interp(params):
 
     return interp_lis_vary
 
-## put the P(k, p_vary) interpolator into a dictionary
+def get_basic_cosmology_vary(params):
+    fid_val = fiducial[params]
+    if params == 'alpha_s':
+        varied_val = alpha_s_vary
+    else:
+        varied_val = fid_val * (1 + percent)
+
+    fisher = fiducial.copy()
+    fisher[params] = varied_val
+
+    _, r_z_vary, H_z_vary = get_basic_cosmology(fisher, redshift)
+    D_A_true_vary = r_z_vary / (1 + redshift)
+    return (D_A_true_vary, H_z_vary)
+
+## put the P(k, p_vary) interpolator and their corresponding true H(z), DA(z) into a dictionary
 ## each entry is a list of the three moments Pk0, Pk2, Pk4
 Pk_interp_vary_dict = {}
+cosmo_vary_dict = {}
 
 for pix, param_name in enumerate(fiducial):
     interp_vary = get_ps_vary_interp(param_name)
     Pk_interp_vary_dict[param_name] = interp_vary
+    
+    cosmo_vary_tuple = get_basic_cosmology_vary(param_name)
+    cosmo_vary_dict[param_name] = cosmo_vary_tuple
 
 
 def fisher_element(param1, param2):
+    # Get the true distances for the varied cosmologies
+    D_A_true1, Hz_true1 = cosmo_vary_dict[param1]
+    D_A_true2, Hz_true2 = cosmo_vary_dict[param2]
+
+    # Compute ratios relative to the fixed fiducial values
+    D_A_ratio1 = D_A_fid / D_A_true1
+    Hz_ratio1 = Hz_true1 / Hz_fid
+
+    D_A_ratio2 = D_A_fid / D_A_true2
+    Hz_ratio2 = Hz_true2 / Hz_fid
+
     ## param1
     interp_lis_vary_1 = Pk_interp_vary_dict[param1]
-    PS_vary_1 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_1)
+    PS_vary_1 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_1, D_A_ratio1, Hz_ratio1)
 
     ## param2
     interp_lis_vary_2 = Pk_interp_vary_dict[param2]
-    PS_vary_2 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_2)
+    PS_vary_2 = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_vary_2, D_A_ratio2, Hz_ratio2)
 
     dPk_1 = PS_vary_1 - PS_HI_2D_fid
     dPk_2 = PS_vary_2 - PS_HI_2D_fid

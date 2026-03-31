@@ -235,6 +235,9 @@ def get_HI_power_spectrum_interp(fid_dict, z, k_upper_lim=200):
 
     return interp_lis
 
+## get interpolators for P(k) using the fiducial cosmology
+interp_lis_fid = get_HI_power_spectrum_interp(fiducial, redshift)
+
 def HI_power_spectrum_2D_tr(k_perp, k_para, interp_lis):
     """
     Compute the true 21-cm power spectrum without the Alcock-Paczynski effect.
@@ -537,10 +540,22 @@ elif array_type == 'FarView':
 else:
     raise ValueError(f"Unknown array_type: {array_type}. Choose 'single' or 'double' or 'FarView'.")
 
+
+# ======================= Power Spectrum Error ============================
 def noise_power_spectrum(k_perp):
-    '''
-    P_N(k) with units
-    '''
+    """
+    Thermal noise power spectrum as defined in Eq.3.9
+
+    Parameters
+    ----------
+    k_perp : float
+        Perpendicular wavenumber in Mpc^-1
+
+    Returns
+    -------
+    float
+        Thermal noise power spectrum value at this k_perp in units of mK^2 Mpc^3
+    """
     u_val = k_perp * r_z / (2 * np.pi)
     D_val = u_val * wavelength
 
@@ -548,9 +563,7 @@ def noise_power_spectrum(k_perp):
     A_eff = wavelength ** 2 * gain / (4 * np.pi) # m^2
 
     noise_coeff_1 = (wavelength / 1000) * (1 + redshift) * r_z ** 2 / H_z
-    # noise_coeff_1 = (0.211/1000) * r_z ** 2 / H_z[0]
-                        ##unit: km Mpc^2 / (km/s/Mpc)
-                        ##      = s Mpc^3
+        ##unit: km Mpc^2 / (km/s/Mpc) = s Mpc^3
     noise_coeff_2 = (wavelength ** 2 / A_eff) ** 2 ##dimensionless
     noise_coeff_3 = (1 / (N_pol * t_tot)) * (S_area / FoV) ##s^-1
     noise_coeff = T_sys ** 2 * noise_coeff_1 * noise_coeff_2 * noise_coeff_3
@@ -562,10 +575,10 @@ def noise_power_spectrum(k_perp):
 
     return 1e6 * P_noise ## mK^2 Mpc^3
 
-##----------------------------------------------------
-## set up the bins in k_perp and k_parallel
+
+# ========================== Set up k-bins ==============================
 k_perp_min = 2 * np.pi * D_min / (r_z * wavelength)
-k_perp_max = 2 * np.pi * D_max / (r_z * wavelength)
+k_perp_max = k_perp_max_func()
 
 def k_para_max():
     freq_21 = (3e8 / 0.211) * 1e-6 ## MHz
@@ -582,10 +595,8 @@ def k_para_min():
 k_parallel_max = k_para_max()
 k_parallel_min = k_para_min()
 
-## k_perp and k_para values in 1D array
-## use the value at bin center
 k_para_all_edges = np.arange(k_parallel_min, k_parallel_max, dk_para)
-k_para_vals = k_para_all_edges[:-1] + 0.5 *dk_para
+k_para_vals = k_para_all_edges[:-1] + 0.5 * dk_para
 
 k_perp_all_edges = 10 ** np.arange(np.log10(k_perp_min), np.log10(k_perp_max), dlnk_perp)
 dk_perp = np.array([k_perp_all_edges[kix+1] - k for kix, k in enumerate(k_perp_all_edges[:-1])])
@@ -593,15 +604,21 @@ k_perp_vals = k_perp_all_edges[:-1] + 0.5 * dk_perp
 
 k_perp_grid, k_para_grid = np.meshgrid(k_perp_vals, k_para_vals[::-1])
 
+## convert also to k-mu grid for refernce
 k_grid = np.sqrt(k_perp_grid ** 2 + k_para_grid ** 2)
 mu_grid = np.sqrt(1 - (k_perp_grid / k_grid) ** 2)
 
-## interpolators for P(k) using fiducial cosmology
-interp_lis_fid = get_HI_power_spectrum_interp(fiducial, redshift)
 
-##--------------------------------------------------------
-## survey volume and number of k-modes
+# =============== compute the survey volume and number of k-modes in each bin ==========================
 def survey_volume():
+    """
+    Comoving survey volume.
+
+    Returns
+    -------
+    float
+        Comoving survey volume in Mpc^3.
+    """
     s_steradian = 0.000304617419786594 * S_area
     s_area_at_z = s_steradian * r_z ** 2 ## Mpc^2
 
@@ -616,27 +633,21 @@ def survey_volume():
 
 def find_k_bin_width(kperp, kperp_edges):
     """
-    Find the bin index and width for a given k_perp value.
+    Find the width of the bin it belongs to for a given k_perp value.
 
     Parameters
     ----------
     kperp : float
         The value of k_perp to locate.
     kperp_edges : 1D numpy array
-        Bin edges (as returned by generate_kperp_bins).
+        A list of values of all bin edges.
 
     Returns
     -------
-    idx : int or None
-        Index of the bin (0‑based) such that edges[idx] <= kperp < edges[idx+1].
-        Returns None if kperp is outside the range [edges[0], edges[-1]).
     width : float or None
-        Width of that bin (edges[idx+1] - edges[idx]).
+        Width of the bin this k_perp belongs to.
         Returns None if kperp is outside the range.
     """
-    # Use searchsorted to find the insertion point that maintains order.
-    # The right side of the interval is open, so we use side='right' to get
-    # the index i such that kperp < edges[i] (strictly). Then the bin is i-1.
     i = np.searchsorted(kperp_edges, kperp, side='right')
     idx = i - 1
 
@@ -644,6 +655,21 @@ def find_k_bin_width(kperp, kperp_edges):
     return width
 
 def number_k_modes(k_perp, k_para):
+    """
+    Number of independent Fourier modes in a given k-bin.
+
+    Parameters
+    ----------
+    k_perp : float
+        Perpendicular wavenumber in Mpc^-1.
+    k_para : float
+        Parallel wavenumber in Mpc^-1.
+
+    Returns
+    -------
+    float
+        Number of modes.
+    """
     V_survey = survey_volume() ## Mpc^3
 
     dk_perp_val = find_k_bin_width(k_perp, k_perp_all_edges)
@@ -656,7 +682,19 @@ def number_k_modes(k_perp, k_para):
 
 def delta_Pk(k_perp, k_para):
     '''
-    total power spectrum error
+    Total power spectrum error in a given k-bin
+
+    Parameters
+    ----------
+    k_perp : float
+        Perpendicular wavenumber in Mpc^-1.
+    k_para : float
+        Parallel wavenumber in Mpc^-1.
+
+    Returns
+    -------
+    float
+        Total power spectrum error in this k-bin.
     '''
     Nk = number_k_modes(k_perp, k_para)
     P_N = noise_power_spectrum(k_perp)
@@ -666,12 +704,12 @@ def delta_Pk(k_perp, k_para):
 
     return delta_Pk ## mK^2 Mpc^3
 
-## 2D power spectrum error
+## Compute the 2D power spectrum and its error
 deltaPK = delta_Pk(k_perp_grid, k_para_grid)
 PS_HI_2D_fid = HI_power_spectrum_2D(k_perp_grid, k_para_grid, interp_lis_fid)
 
-##-------------------------------------------
-## Fisher matrix
+
+# ================ Fisher matrix forecast =====================================
 
 ##set the percentage for numerical derivative
 ##set a variation for alpha_s
@@ -679,6 +717,20 @@ percent = 0.05
 alpha_s_vary = 0.05
 
 def get_ps_vary_interp(params):
+    """
+    Return the interpolators of the 21-cm power spectrum monopole, dipole and quadrupole moments 
+        based on a varied cosmology.
+
+    Parameters
+    ----------
+    params : str
+        Name of the parameter to vary (ombh2, omch2, As, ns, H0, tau, alpha_s).
+
+    Returns
+    -------
+    list of CubicSpline
+        Interpolators of monopole, dipole and quadrupole moments for this varied cosmology.
+    """
     fid_val = fiducial[params]
     if params == 'alpha_s':
         varied_val = alpha_s_vary
@@ -693,6 +745,20 @@ def get_ps_vary_interp(params):
     return interp_lis_vary
 
 def get_basic_cosmology_vary(params):
+    """
+    Compute true angular diameter distance and Hubble parameter for a varied cosmology
+        to be used in Alcock-Pacyznski effect calculations
+
+    Parameters
+    ----------
+    params : str
+        Name of the parameter to vary (ombh2, omch2, As, ns, H0, tau, alpha_s).
+
+    Returns
+    -------
+    tuple (D_A_true, H_true)
+        Angular diameter distance (Mpc) and Hubble parameter (km/s/Mpc).
+    """
     fid_val = fiducial[params]
     if params == 'alpha_s':
         varied_val = alpha_s_vary
@@ -720,6 +786,19 @@ for pix, param_name in enumerate(fiducial):
 
 
 def fisher_element(param1, param2):
+    """
+    Compute a single entry in the Fisher matrix.
+
+    Parameters
+    ----------
+    param1, param2 : str
+        Names of the two cosmological parameters (ombh2, omch2, As, ns, H0, tau, alpha_s).
+
+    Returns
+    -------
+    float
+        Fisher matrix entry corresponding to these two parameters.
+    """
     # Get the true distances for the varied cosmologies
     D_A_true1, Hz_true1 = cosmo_vary_dict[param1]
     D_A_true2, Hz_true2 = cosmo_vary_dict[param2]
@@ -761,14 +840,21 @@ def fisher_element(param1, param2):
 
     return np.sum(integrand)
 
-# print(fisher_element('ombh2', 'ombh2'))
 
+## build the Fisher matrix
 fiducial_fisher = fiducial.copy()
 fiducial_fisher.pop('tau')
 
 fisher_matrix = np.zeros((len(fiducial_fisher), len(fiducial_fisher)))
 
 def run():
+    """
+    Main driver: 
+        - compute Fisher matrix
+        - save outputs
+        - print constraints
+        - print number of modes.
+    """
     for pix1, p1 in enumerate(fiducial_fisher):
         for pix2, p2 in enumerate(fiducial_fisher):
             entry = fisher_element(p1, p2)

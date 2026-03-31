@@ -1,14 +1,16 @@
-## Combines different array configuration into a single script
-## single redshift
-## correct survey volume and k binning
-## no AP effect
-## all combined into ONE power spectrum function
-## reads in a params.ini file
-## one circular array
+#!/usr/bin/env python3
+"""
+Forecast of power spectrum measurement and cosmological constraints
+    based on the 21-cm power spectrum measured by a lunar far-side interferometer.
 
-## import packages
+This code accompanies the paper:
+    "A Designer’s Guide to Lunar Far-Side Interferometer Array: 
+        Power Spectrum Measurement and Cosmological Constraints from the Dark Ages", 
+        Yuewei Wen and Xuelei Chen. (2026), Journal/arXiv:XXXX.XXXXX
+"""
+
+# ===================== import packages ========================
 import numpy as np
-import matplotlib.pyplot as plt
 import camb
 from camb import model
 from scipy.interpolate import CubicSpline
@@ -19,9 +21,21 @@ import sys
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
 
-## load parameters from params.ini
+# =============== load parameters from params.ini ==============
 def load_parameters(ini_file='params.ini'):
-    # Get the directory where this script lives
+    """
+    Read parameters of about the array and survey from a .ini file.
+
+    Parameters
+    ----------
+    ini_file : str, optional
+        Path to the parameter file (default: 'params.ini').
+
+    Returns
+    -------
+    dict
+        Parameter names as keys, values converted to int/float where possible.
+    """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     full_path = os.path.join(script_dir, ini_file)
 
@@ -56,8 +70,8 @@ PARAMS = load_parameters()
 safe_keys = [k for k in PARAMS if not k.startswith('_') and k not in dir(__builtins__)]
 globals().update({k: PARAMS[k] for k in safe_keys})
 
-##----------------------------------------
-## set the fiducial cosmology
+
+## ================ set the fiducial cosmology ==================
 fiducial = {
     'ombh2' : ombh2,
     'omch2' : omch2,
@@ -70,33 +84,74 @@ fiducial = {
 
 h = fiducial['H0'] / 100
 
-fiducial_arr = np.array([v for v in fiducial.values()])
-
+## the redshifted 21-cm wavelength/frequency
 wavelength = 0.211 * (redshift + 1) #m
 freq = (3e8 / wavelength) * 1e-6 #MHz
-t_tot = t_tot * 3600 ## convert from hours to seconds
 
-## design an array
-D_half_lambda = wavelength/2
-if D_min < D_half_lambda:
-    logging.warning('D_min is smaller than half wavelength')
-
-## conversions
 def z_to_freq(z):
+    """
+    Convert redshift to frequency for the 21 cm line.
+
+    Parameters
+    ----------
+    z : float
+        Redshift.
+
+    Returns
+    -------
+    float
+        Frequency in MHz.
+    """
     lam = (1+z) * 0.211
     frequency = (3e8 / lam) * 1e-6
     return frequency ## MHz
 
 def freq_to_z(nu):
-    '''
-    nu: MHz
-    '''
+    """
+    Convert frequency to redshift for the 21 cm line.
+
+    Parameters
+    ----------
+    nu : float
+        Frequency in MHz
+
+    Returns
+    -------
+    float
+        Redshift
+    """
     lam = 3e8 / (nu * 1e6)
     z = (lam / 0.211) - 1
     return z
 
-## basic cosmology quantities
+## process some survey parameters
+D_half_lambda = wavelength/2
+if D_min < D_half_lambda:
+    logging.warning('D_min is smaller than half wavelength')
+
+t_tot = t_tot * 3600 ## convert from hours to seconds
+
+# ===================== get basic cosmological quantities ===================
 def get_basic_cosmology(fid_dict, z):
+    """
+    Compute basic cosmological quantities like radial comoving distance and Hubble parameter 
+        for a given cosmology and redshift.
+
+    Parameters
+    ----------
+    fid_dict : dict
+        Dictionary of cosmological parameters (ombh2, omch2, tau, As, ns, H0, alpha_s).
+    z : float
+        Redshift.
+
+    Returns
+    -------
+    results : CAMB results object
+    r_z : float
+        Comoving radial distance in Mpc.
+    H_z : float
+        Hubble parameter in km/s/Mpc.
+    """
     pars=camb.set_params(ombh2= fid_dict["ombh2"], omch2= fid_dict["omch2"], 
                             tau = fid_dict["tau"], As=fid_dict["As"], 
                             nrun=fid_dict["alpha_s"], ns= fid_dict["ns"], 
@@ -112,47 +167,64 @@ def get_basic_cosmology(fid_dict, z):
 
 results, r_z, H_z = get_basic_cosmology(fiducial, redshift)
 
-# Store quantities for the AP effect 
-D_A_tr = r_z / (1 + redshift)
+# Store these quantities for the AP effect 
+D_A_tr = r_z / (1 + redshift) ## angular diameter distance in Mpc
 Hz_tr = H_z
 
 D_A_fid = D_A_tr
 Hz_fid = Hz_tr
 
-## run CAMB
+# ================= Calculate the 21-cm power spectrum wit CAMB ================
 def get_HI_power_spectrum_interp(fid_dict, z, k_upper_lim=200):
-    ## set the cosmology
+    """
+    Build cubic spline interpolators for the monopole, dipole, and quadrupole moments
+        of the 21-cm power spectrum.
+
+    Parameters
+    ----------
+    fid_dict : dict
+        Dictionary of cosmological parameters (ombh2, omch2, tau, As, ns, H0, alpha_s).
+    z : float
+        Redshift.
+    k_upper_lim : float, optional
+        Maximum k for CAMB to compute (default: 200).
+
+    Returns
+    -------
+    list of CubicSpline
+        Interpolators for the monopole, dipole, and quadrupole moments (Pk0, Pk2, Pk4) 
+            in units of mK^2 Mpc^3.
+    """
+    ## set the basic cosmology
     pars=camb.set_params(ombh2= fid_dict["ombh2"], omch2= fid_dict["omch2"], 
                             tau = fid_dict["tau"], As=fid_dict["As"], 
                             nrun=fid_dict["alpha_s"], ns= fid_dict["ns"], 
                             H0=fid_dict["H0"], num_massive_neutrinos=1)
     
-    ## set 21cm parameters 
-    pars.Do21cm  =True
-
-    pars.Evolve_delta_xe =True # ionization fraction perturbations
-    pars.Evolve_baryon_cs  = True # accurate baryon perturbations
-    pars.WantCls =False
-    pars.SourceTerms.use_21cm_mK = True # Use dimensionless rather than mK units
+    ## set 21cm-related parameters 
+    pars.Do21cm = True
+    pars.Evolve_delta_xe = True # ionization fraction perturbations
+    pars.Evolve_baryon_cs = True # accurate baryon perturbations
+    pars.WantCls = False
+    pars.SourceTerms.use_21cm_mK = True # power spectrum with the mK units
     pars.set_matter_power(kmax=k_upper_lim, redshifts=[z])
 
     # get transfer functions
-    
     results= camb.get_results(pars)    
     trans = results.get_matter_transfer_data()
 
     k = trans.transfer_data[0,:,0]* results.Params.h
-    primordial_PK = results.Params.scalar_power(k)
+    primordial_PK = results.Params.scalar_power(k) ## get the primordial power spectrum
 
-    mono_trans = trans.transfer_data[model.Transfer_monopole-1, :, 0] * k ** 2
+    mono_trans = trans.transfer_data[model.Transfer_monopole-1, :, 0] * k ** 2 ## Eq. 2.2 in paper
     baryon_trans = trans.transfer_data[model.Transfer_b-1, :, 0] * k ** 2
 
-    # get the moments of power spectrum Delta^2(k) in units of mK^2
+    # get the three moments of power spectrum in units of mK^2
     Pk_0_tr = primordial_PK * mono_trans ** 2
     Pk_2_tr = 2 * primordial_PK * mono_trans * baryon_trans
     Pk_4_tr = primordial_PK * baryon_trans ** 2
 
-    factor = 2 * np.pi ** 2 / (k ** 3)
+    factor = 2 * np.pi ** 2 / (k ** 3) ## convert $\Delta^2(k)$ to P(k)
 
     # build the interpolator in unit of mK^2 Mpc^3
     Pk_mono_spline = CubicSpline(k, Pk_0_tr * factor)
@@ -164,6 +236,23 @@ def get_HI_power_spectrum_interp(fid_dict, z, k_upper_lim=200):
     return interp_lis
 
 def HI_power_spectrum_2D_tr(k_perp, k_para, interp_lis):
+    """
+    Compute the true 21-cm power spectrum without the Alcock-Paczynski effect.
+
+    Parameters
+    ----------
+    k_perp : array_like
+        Perpendicular wavenumber (in true cosmology).
+    k_para : array_like
+        Parallel wavenumber (in true cosmology).
+    interp_lis : list of CubicSpline
+        Interpolators generated from the `get_HI_power_spectrum_interp()` function.
+
+    Returns
+    -------
+    array_like
+        Power spectrum value at this (k_\perp, k_\parallel) in unit of mK^2 Mpc^3.
+    """
     k = np.sqrt(k_perp ** 2 + k_para ** 2)
     mu = np.sqrt(1 - (k_perp / k) ** 2)
 
@@ -178,16 +267,17 @@ def HI_power_spectrum_2D_tr(k_perp, k_para, interp_lis):
 def HI_power_spectrum_2D(k_perp_obs, k_para_obs, interp_lis_true,
                             D_A_ratio=1.0, Hz_ratio=1.0):
     """
-    Compute the observed 21cm power spectrum including the AP effect.
+    Compute the observed 21cm power spectrum including the Alock-Paczynski effect.
 
     Parameters
     ----------
     k_perp_obs : array_like
-        Observed perpendicular wavenumber (in the fiducial cosmology)
+        Observed perpendicular wavenumber
     k_para_obs : array_like
-        Observed parallel wavenumber (in the fiducial cosmology)
+        Observed parallel wavenumber
     interp_lis_true : list of CubicSpline
-        Interpolators for the true power spectrum (monopole, dipole, quadrupole)
+        Interpolators for the true power spectrum 
+            generated from the `get_HI_power_spectrum_interp()` function.
     D_A_ratio : float
         Ratio D_A_fid / D_A_true
     Hz_ratio : float
@@ -196,7 +286,7 @@ def HI_power_spectrum_2D(k_perp_obs, k_para_obs, interp_lis_true,
     Returns
     -------
     array_like
-        Observed power spectrum P_obs (in mK^2 Mpc^3)
+        Observed power spectrum value at this (k_\perp, k_\parallel) in unit of mK^2 Mpc^3
     """
     # Map to true k values
     k_perp_true = D_A_ratio * k_perp_obs
@@ -210,78 +300,201 @@ def HI_power_spectrum_2D(k_perp_obs, k_para_obs, interp_lis_true,
 
     return P_true * volume_factor ## mK^2 Mpc^-3
 
-## Baseline distribution
+
+# ===================== Baseline distributions =======================
+def single_circular_pdf(d, D_min, D_max):
+    """
+    Probability density function w.r.t. baseline length for a single circular array.
+
+    Parameters
+    ----------
+    d : array_like
+        Baseline lengths in meters.
+    D_min : float
+        Minimum baseline length in meters.
+    D_max : float
+        Minimum baseline length in meters.
+
+    Returns
+    -------
+    array_like
+        probability for this given baseline length in unit of m^-1.
+    """
+    d = np.asarray(d)
+    pdf = np.zeros_like(d)
+    mask = (d > D_min) & (d < D_max)
+    if np.any(mask):
+        x = d[mask] / D_max
+        term = np.arccos(x) - x * np.sqrt(1 - x**2)
+        pdf[mask] = (16 * d[mask]) / (np.pi * D_max**2) * term
+    return pdf
+
 if array_type == 'single':
     # Baseline distribution for a single circular array
-    def baseline_pdf(d, D, D_min):
-        d = np.asarray(d)
-        pdf = np.zeros_like(d)
-        mask = (d > D_min) & (d < D)
-        if np.any(mask):
-            x = d[mask] / D
-            term = np.arccos(x) - x * np.sqrt(1 - x**2)
-            pdf[mask] = (16 * d[mask]) / (np.pi * D**2) * term
-        return pdf
+    def nb_D_func(d, N, D_min, D_max):
+        """
+        Wrapper for the baseline density distribution function.
 
-    def baseline_radial_number_density(d, N, D, D_min):
+        Parameters
+        ----------
+        d : array_like
+            Baseline lengths in meters.
+        N : int
+            Number of antennas.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Baseline density in units of m^-2.
+        """
         total_baselines = N * (N - 1) / 2
-        return total_baselines * baseline_pdf(d, D, D_min)
-
-    def nb_circular(d, N, D, D_min):
-        radial_density = baseline_radial_number_density(d, N, D, D_min)
+        radial_density = total_baselines * single_circular_pdf(d, D_min, D_max)
         with np.errstate(divide='ignore', invalid='ignore'):
             uv_density = radial_density / (2 * np.pi * d)
         uv_density[d == 0] = 0
         return uv_density
 
-    def nb_D_func(d, N, D_min, D_max):
-        return nb_circular(d, N, D_max, D_min)
-
     def k_perp_max_func():
+        """
+        Maximum perpendicular wavenumber.
+
+        Returns
+        -------
+        float
+            Maximum k_perp in Mpc^-1.
+        """
         return 2 * np.pi * D_max / (r_z * wavelength)
 
 elif array_type == 'double':
-    # Double‑array baseline distribution
-    def circular_pdf(d, D_min, D_max):
-        d = np.asarray(d)
-        pdf = np.zeros_like(d)
-        mask = (d > D_min) & (d < D_max)
-        if np.any(mask):
-            x = d[mask] / D_max
-            term = np.arccos(x) - x * np.sqrt(1 - x**2)
-            pdf[mask] = (16 * d[mask]) / (np.pi * D_max**2) * term
-        return pdf
-
+    # Baseline distribution for the double-array scenario
     def dN_intra_dd(d, N, D_min, D_max):
+        """
+        Intra-array baseline number density.
+
+        Parameters
+        ----------
+        d : array_like
+            Baseline lengths in meters.
+        N : int
+            Number of antennas in each circular array.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Number density in m^-1.
+        """
         total_intra = 2 * (N * (N - 1) / 2)
-        return total_intra * circular_pdf(d, D_min, D_max)
+        return total_intra * single_circular_pdf(d, D_min, D_max)
 
     def f_cross_length(d_grid, L, D_min, D_max, n_theta=1000):
+        """
+        Probability distribution for cross-baselines.
+
+        Parameters
+        ----------
+        d_grid : array_like
+            Baseline lengths in meters
+        L : float
+            Separation between array centers in meters.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+        n_theta : int, optional
+            Number of quadrature points for the numerical integration.
+
+        Returns
+        -------
+        array_like
+            Probability w.r.t. a cross-baseline of this length.
+        """
         theta = np.linspace(0, 2*np.pi, n_theta)
         cos_theta = np.cos(theta).reshape(-1, 1, 1)
         d_reshaped = d_grid.reshape(1, *d_grid.shape)
         r = np.sqrt(d_reshaped**2 + L**2 - 2 * d_reshaped * L * cos_theta)
-        pdf_vals = circular_pdf(r, D_min, D_max)
+        pdf_vals = single_circular_pdf(r, D_min, D_max)
         integrand_vals = np.where(r < 1e-12, 0.0, pdf_vals / (2 * np.pi * r))
         integral = simpson(integrand_vals, x=theta, axis=0)
         return d_grid * integral
 
     def dN_cross_dd(d, L, N, D_min, D_max):
+        """
+        Number density for cross-baselines
+
+        Parameters
+        ----------
+        d : array_like
+            Baseline lengths in meters.
+        L : float
+            Separation between array centers in meters.
+        N : int
+            Number of antennas per array.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Number density of the given cross-baseline in m^-1.
+        """
         condition = (d < abs(L - D_max)) | (d > L + D_max)
         return np.where(condition, 0.0, N**2 * f_cross_length(d, L, D_min, D_max))
 
-    def dN_total_dd(d, L, N, D_min, D_max):
-        return dN_intra_dd(d, N, D_min, D_max) + dN_cross_dd(d, L, N, D_min, D_max)
-
     def nb_D_func(d, N, D_min, D_max):
-        epsilon = 1e-10
-        return epsilon + (1 / (2 * np.pi * d)) * dN_total_dd(d, L, N, D_min, D_max)
+        """
+        Wrapper for the baseline density distribution function.
+
+        Parameters
+        ----------
+        d : array_like
+            Baseline lengths in meters.
+        N : int
+            Number of antennas per array.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Number density of baselines of this length in m^-2.
+        """
+        epsilon = 1e-10 ## to avoid numerical errors for baseline lengths that are not probed
+        dN_tot = dN_intra_dd(d, N, D_min, D_max) + dN_cross_dd(d, L, N, D_min, D_max)
+        return epsilon + (1 / (2 * np.pi * d)) * dN_tot
 
     def k_perp_max_func():
+        """
+        Maximum perpendicular wavenumber.
+
+        Returns
+        -------
+        float
+            Maximum k_perp in Mpc^-1.
+        """
         return 2 * np.pi * (D_max + L) / (r_z * wavelength)
     
 elif array_type == 'FarView':
+    ## Baseline distribution for the FarView/Farside configuration
     def nb_D_FarView(D, N_ant, D_min, D_max):
+        """
+        Baseline number density following the FarView/FarSide fitting formula
+
+        Parameters
+        ----------
+        D : array_like
+            Baseline lengths in meters.
+        N_ant : int
+            Number of antennas.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Number density of baselines of given length in units of m^-2.
+        """
         integrand = lambda D: 2 * np.pi * D * (D - D0) ** 2 * np.exp(- ((D- D0) / w) ** 2)
 
         int_res = quad(integrand, D_min, D_max)
@@ -291,9 +504,34 @@ elif array_type == 'FarView':
         return A * (D - D0) ** 2 * np.exp(- ((D - D0) / w) ** 2)
 
     def nb_D_func(d, N, D_min, D_max):
+        """
+        Wrapper for the baseline density distribution function.
+
+        Parameters
+        ----------
+        d : array_like
+            Baseline lengths in meters.
+        N : int
+            Number of antennas per array.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Number density of baselines of this length in m^-2.
+        """
         return nb_D_FarView(d, N, D_min, D_max)
 
     def k_perp_max_func():
+        """
+        Maximum perpendicular wavenumber.
+
+        Returns
+        -------
+        float
+            Maximum k_perp in Mpc^-1.
+        """
         return 2 * np.pi * D_max / (r_z * wavelength)
 
 else:

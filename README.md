@@ -80,8 +80,9 @@ The script will:
 
 Example output:
 
+```
 Saved outputs to outputs_double_array.npz
-
+-----------------------
 Constraint on cosmological parameters:
 ombh2: 0.004256608688653717
 omch2: 0.016240351726979102
@@ -89,8 +90,9 @@ As: 1.6487225295945772e-09
 ns: 0.08244841267294853
 H0: 3.3892816894726923
 alpha_s: 0.05565676991265285
-
+-----------------------
 Number of modes: 81577.67147385971
+```
 
 ---
 

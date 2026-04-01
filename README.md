@@ -120,9 +120,12 @@ ps = data['ps_21']
 
 ## Citation
 If you use this code for your research, please cite the paper:
+
+```Bibtex
 @article{Wen2026,
   title   = {A Designer's Guide to Lunar Far‑Side Interferometer Array: Power Spectrum Measurement and Cosmological Constraints from the Dark Ages},
   author  = {Yuewei Wen and Xuelei Chen},
   journal = {to appear},
   year    = {2026}
 }
+```

@@ -539,7 +539,7 @@ elif array_type == 'FarView':
         return 2 * np.pi * D_max / (r_z * wavelength)
     
 elif array_type == 'triple':
-    def nb_D_analytical(d, N, D_min, D_max, L):
+    def nb_D_triple_analytical(d, N, D_min, D_max, L):
         d = np.asarray(d)
 
         # Intra‑array part: 3 stations * C(N,2) baselines each
@@ -554,149 +554,11 @@ elif array_type == 'triple':
         with np.errstate(divide='ignore', invalid='ignore'):
             uv_density = total_radial / (2 * np.pi * d)
         uv_density[d == 0] = 0
-        return uv_density ## m^-2
+        
+        epsilon = 1e-10
+        return uv_density + epsilon ## m^-2
 
-    def triple_baseline_radial_density(L, D_station, N_true, m=1000, n_realisations=10,
-                                nbins=5000, rmax=None):
-        """
-        Monte Carlo estimation of the radial baseline density for an interferometer
-        consisting of three circular stations at the vertices of an equilateral triangle.
-
-        Parameters
-        ----------
-        L : float
-            Side length of the equilateral triangle (same units as R_station).
-        R_station : float
-            Radius of each circular station.
-        N_true : int
-            True (large) number of antennas per station.
-        m : int
-            Number of antennas per station used in the Monte Carlo simulation.
-            Should be much smaller than N_true (e.g., 100–500) for computational efficiency.
-        n_realisations : int
-            Number of independent Monte Carlo realisations to average over.
-        nbins : int, optional
-            Number of bins for the radial histogram.
-        rmax : float, optional
-            Maximum baseline length to consider. If None, set to 2*(L + 2*R_station)
-            which safely covers all possible baselines.
-
-        Returns
-        -------
-        bin_centers : ndarray
-            Centers of the radial bins (same units as L).
-        density : ndarray
-            Scaled baseline density (number of baselines per bin) for the true array
-            with N_true antennas per station.
-        """
-        # turn diameter into radius
-        R_station = D_station / 2
-
-        # Set rmax if not provided
-        if rmax is None:
-            rmax = L + 2.0 * R_station
-
-        # see if m is smaller than N_true:
-        if m > N_true:
-            m = N_true
-
-        # Bin edges and centers
-        bin_edges = np.logspace(np.log10(1e-3), np.log10(rmax), nbins+1)  # start at 1 mm
-        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        bin_width = np.diff(bin_edges)
-
-        # Positions of the three station centres (equilateral triangle)
-        centres = np.array([
-            [0.0, 0.0],
-            [L, 0.0],
-            [L/2.0, L * np.sqrt(3.0)/2.0]
-        ])
-
-        # Accumulator for the histogram (sum over realisations)
-        hist_sum = np.zeros(nbins, dtype=np.float64)
-
-        # Monte Carlo loop
-        for _ in range(n_realisations):
-            # Generate antenna positions for all three stations
-            all_positions = []
-            for c in centres:
-                # Draw m random points uniformly inside a circle of radius R_station
-                r = R_station * np.sqrt(np.random.rand(m))
-                theta = 2.0 * np.pi * np.random.rand(m)
-                dx = r * np.cos(theta)
-                dy = r * np.sin(theta)
-                x = c[0] + dx
-                y = c[1] + dy
-                all_positions.append(np.column_stack((x, y)))
-            positions = np.vstack(all_positions)   # shape (3*m, 2)
-
-            # Compute all pairwise baseline lengths (Euclidean distances)
-            baseline_lengths = pdist(positions)
-
-            # Histogram for this realisation
-            hist, _ = np.histogram(baseline_lengths, bins=bin_edges)
-            hist_sum += hist
-
-        # Average over realisations
-        hist_mean = hist_sum / n_realisations
-
-        # Scale from m antennas per station to N_true antennas per station
-        # Total number of baselines scales as (N_true / m)^2
-        scale = (N_true / m) ** 2
-        density_scaled = hist_mean * scale
-
-        density_per_m = density_scaled / bin_width
-
-        num_density = density_per_m / (2 * np.pi * bin_centers)
-
-        # build the interpolator
-        interp_nb = CubicSpline(bin_centers, num_density, extrapolate=False)
-
-        print(f"Triple MC: bin_centers range = {bin_centers[0]:.2e} to {bin_centers[-1]:.2e}")
-        print(f"Triple MC: density_scaled min/max = {density_scaled.min():.2e} / {density_scaled.max():.2e}")
-        print(f"Triple MC: number density (per m) min/max = {num_density.min():.2e} / {num_density.max():.2e}")
-
-        return interp_nb
-    
-    interp_nb_triple = triple_baseline_radial_density(L, D_max, N_antenna)
-
-    def nb_D_monte_carlo(d, N, D_min, D_max):
-        d_safe = np.maximum(d, 1e-6)
-        d_safe = np.minimum(d_safe, interp_nb_triple.x[-1] * 0.999)
-        val = interp_nb_triple(d_safe)
-        return np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
-    
-    USE_ANALYTICAL = False   # switch to False for Monte Carlo
-
-    if USE_ANALYTICAL:
-        nb_D_func = lambda d, N, D_min, D_max: nb_D_analytical(d, N, D_min, D_max, L)
-    else:
-        nb_D_func = nb_D_monte_carlo
-    
-    # def nb_D_func(d, N, D_min, D_max):
-    #     """
-    #     Wrapper for the baseline density distribution function.
-
-    #     Parameters
-    #     ----------
-    #     d : array_like
-    #         Baseline lengths in meters.
-    #     N : int
-    #         Number of antennas per array.
-    #     D_min, D_max : float
-    #         Minimum and maximum baseline lengths in meters.
-
-    #     Returns
-    #     -------
-    #     array_like
-    #         Number density of baselines of this length in m^-2.
-    #     """
-    #     d_safe = np.maximum(d, 1e-6)   # avoid d=0
-    #     d_safe = np.minimum(d_safe, interp_nb_triple.x[-1] * 0.999)  # avoid extrapolation
-    #     val = interp_nb_triple(d_safe)
-    #     # Replace any remaining nan/inf with 0
-    #     val = np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
-    #     return val
+    nb_D_func = lambda d, N, D_min, D_max: nb_D_triple_analytical(d, N, D_min, D_max, L)
         
     def k_perp_max_func():
         """
@@ -708,7 +570,6 @@ elif array_type == 'triple':
             Maximum k_perp in Mpc^-1.
         """
         return 2 * np.pi * (D_max + L) / (r_z * wavelength)
-
 
 else:
     raise ValueError(f"Unknown array_type: {array_type}. Choose 'single' or 'double' or 'FarView'.")

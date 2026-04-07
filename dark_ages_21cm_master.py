@@ -18,6 +18,7 @@ from scipy.integrate import quad, simpson
 import os
 import logging
 import sys
+from scipy.spatial.distance import pdist, squareform
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
 
@@ -536,6 +537,138 @@ elif array_type == 'FarView':
             Maximum k_perp in Mpc^-1.
         """
         return 2 * np.pi * D_max / (r_z * wavelength)
+    
+elif array_type == 'Triple':
+    def triple_baseline_radial_density(L, D_station, N_true, m=1000, n_realisations=3,
+                                nbins=200, rmax=None):
+        """
+        Monte Carlo estimation of the radial baseline density for an interferometer
+        consisting of three circular stations at the vertices of an equilateral triangle.
+
+        Parameters
+        ----------
+        L : float
+            Side length of the equilateral triangle (same units as R_station).
+        R_station : float
+            Radius of each circular station.
+        N_true : int
+            True (large) number of antennas per station.
+        m : int
+            Number of antennas per station used in the Monte Carlo simulation.
+            Should be much smaller than N_true (e.g., 100–500) for computational efficiency.
+        n_realisations : int
+            Number of independent Monte Carlo realisations to average over.
+        nbins : int, optional
+            Number of bins for the radial histogram.
+        rmax : float, optional
+            Maximum baseline length to consider. If None, set to 2*(L + 2*R_station)
+            which safely covers all possible baselines.
+
+        Returns
+        -------
+        bin_centers : ndarray
+            Centers of the radial bins (same units as L).
+        density : ndarray
+            Scaled baseline density (number of baselines per bin) for the true array
+            with N_true antennas per station.
+        """
+        # Set rmax if not provided
+        if rmax is None:
+            rmax = L + 2.0 * R_station
+
+        # see if m is smaller than N_true:
+        if m > N_true:
+            m = N_true
+
+        R_station = D_station / 2
+
+        # Bin edges and centers
+        bin_edges = np.linspace(0.0, rmax, nbins + 1)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        bin_width = bin_edges[1] - bin_edges[0]
+
+        # Positions of the three station centres (equilateral triangle)
+        centres = np.array([
+            [0.0, 0.0],
+            [L, 0.0],
+            [L/2.0, L * np.sqrt(3.0)/2.0]
+        ])
+
+        # Accumulator for the histogram (sum over realisations)
+        hist_sum = np.zeros(nbins, dtype=np.float64)
+
+        # Monte Carlo loop
+        for _ in range(n_realisations):
+            # Generate antenna positions for all three stations
+            all_positions = []
+            for c in centres:
+                # Draw m random points uniformly inside a circle of radius R_station
+                r = R_station * np.sqrt(np.random.rand(m))
+                theta = 2.0 * np.pi * np.random.rand(m)
+                dx = r * np.cos(theta)
+                dy = r * np.sin(theta)
+                x = c[0] + dx
+                y = c[1] + dy
+                all_positions.append(np.column_stack((x, y)))
+            positions = np.vstack(all_positions)   # shape (3*m, 2)
+
+            # Compute all pairwise baseline lengths (Euclidean distances)
+            baseline_lengths = pdist(positions)
+
+            # Histogram for this realisation
+            hist, _ = np.histogram(baseline_lengths, bins=bin_edges)
+            hist_sum += hist
+
+        # Average over realisations
+        hist_mean = hist_sum / n_realisations
+
+        # Scale from m antennas per station to N_true antennas per station
+        # Total number of baselines scales as (N_true / m)^2
+        scale = (N_true / m) ** 2
+        density_scaled = hist_mean * scale
+
+        density_per_m = density_scaled / bin_width
+
+        num_density = density_per_m / (2 * np.pi * bin_centers)
+
+        # build the interpolator
+        interp_nb = CubicSpline(bin_centers, num_density)
+
+        return interp_nb
+    
+    def nb_D_func(d, N, D_min, D_max):
+        """
+        Wrapper for the baseline density distribution function.
+
+        Parameters
+        ----------
+        d : array_like
+            Baseline lengths in meters.
+        N : int
+            Number of antennas per array.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+
+        Returns
+        -------
+        array_like
+            Number density of baselines of this length in m^-2.
+        """
+        interp_nb = triple_baseline_radial_density(L, D_max, N)
+
+        return interp_nb(d)
+        
+    def k_perp_max_func():
+        """
+        Maximum perpendicular wavenumber.
+
+        Returns
+        -------
+        float
+            Maximum k_perp in Mpc^-1.
+        """
+        return 2 * np.pi * (D_max + L) / (r_z * wavelength)
+
 
 else:
     raise ValueError(f"Unknown array_type: {array_type}. Choose 'single' or 'double' or 'FarView'.")

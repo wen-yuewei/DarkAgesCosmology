@@ -18,6 +18,7 @@ from scipy.integrate import quad, simpson
 import os
 import logging
 import sys
+from scipy.spatial.distance import pdist, squareform
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
 
@@ -321,7 +322,7 @@ def single_circular_pdf(d, D_min, D_max):
     Returns
     -------
     array_like
-        probability for this given baseline length in unit of m^-1.
+        radial probability for this given baseline length in unit of m^-1.
     """
     d = np.asarray(d)
     pdf = np.zeros_like(d)
@@ -331,6 +332,35 @@ def single_circular_pdf(d, D_min, D_max):
         term = np.arccos(x) - x * np.sqrt(1 - x**2)
         pdf[mask] = (16 * d[mask]) / (np.pi * D_max**2) * term
     return pdf
+
+def f_cross_length(d_grid, L, D_min, D_max, n_theta=1000):
+        """
+        Probability distribution for cross-baselines.
+
+        Parameters
+        ----------
+        d_grid : array_like
+            Baseline lengths in meters
+        L : float
+            Separation between array centers in meters.
+        D_min, D_max : float
+            Minimum and maximum baseline lengths in meters.
+        n_theta : int, optional
+            Number of quadrature points for the numerical integration.
+
+        Returns
+        -------
+        array_like
+            Probability w.r.t. a cross-baseline of this length.
+        """
+        theta = np.linspace(0, 2*np.pi, n_theta)
+        cos_theta = np.cos(theta).reshape(-1, 1, 1)
+        d_reshaped = d_grid.reshape(1, *d_grid.shape)
+        r = np.sqrt(d_reshaped**2 + L**2 - 2 * d_reshaped * L * cos_theta)
+        pdf_vals = single_circular_pdf(r, D_min, D_max)
+        integrand_vals = np.where(r < 1e-12, 0.0, pdf_vals / (2 * np.pi * r))
+        integral = simpson(integrand_vals, x=theta, axis=0)
+        return d_grid * integral
 
 if array_type == 'single':
     # Baseline distribution for a single circular array
@@ -392,35 +422,6 @@ elif array_type == 'double':
         """
         total_intra = 2 * (N * (N - 1) / 2)
         return total_intra * single_circular_pdf(d, D_min, D_max)
-
-    def f_cross_length(d_grid, L, D_min, D_max, n_theta=1000):
-        """
-        Probability distribution for cross-baselines.
-
-        Parameters
-        ----------
-        d_grid : array_like
-            Baseline lengths in meters
-        L : float
-            Separation between array centers in meters.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-        n_theta : int, optional
-            Number of quadrature points for the numerical integration.
-
-        Returns
-        -------
-        array_like
-            Probability w.r.t. a cross-baseline of this length.
-        """
-        theta = np.linspace(0, 2*np.pi, n_theta)
-        cos_theta = np.cos(theta).reshape(-1, 1, 1)
-        d_reshaped = d_grid.reshape(1, *d_grid.shape)
-        r = np.sqrt(d_reshaped**2 + L**2 - 2 * d_reshaped * L * cos_theta)
-        pdf_vals = single_circular_pdf(r, D_min, D_max)
-        integrand_vals = np.where(r < 1e-12, 0.0, pdf_vals / (2 * np.pi * r))
-        integral = simpson(integrand_vals, x=theta, axis=0)
-        return d_grid * integral
 
     def dN_cross_dd(d, L, N, D_min, D_max):
         """
@@ -536,6 +537,39 @@ elif array_type == 'FarView':
             Maximum k_perp in Mpc^-1.
         """
         return 2 * np.pi * D_max / (r_z * wavelength)
+    
+elif array_type == 'triple':
+    def nb_D_triple_analytical(d, N, D_min, D_max, L):
+        d = np.asarray(d)
+
+        # Intra‑array part: 3 stations * C(N,2) baselines each
+        intra_radial = 3 * (N * (N - 1) / 2) * single_circular_pdf(d, D_min, D_max)
+
+        # Cross‑array part: 3 station pairs * N^2 baselines each
+        # f_cross_length returns the radial density (in m^-1) for one pair
+        cross_radial = 3 * (N**2) * f_cross_length(d, L, D_min, D_max)
+        total_radial = intra_radial + cross_radial
+        
+        # Convert to uv‑density (m^-2) as in nb_D_func for double array
+        with np.errstate(divide='ignore', invalid='ignore'):
+            uv_density = total_radial / (2 * np.pi * d)
+        uv_density[d == 0] = 0
+        
+        epsilon = 1e-10
+        return uv_density + epsilon ## m^-2
+
+    nb_D_func = lambda d, N, D_min, D_max: nb_D_triple_analytical(d, N, D_min, D_max, L)
+        
+    def k_perp_max_func():
+        """
+        Maximum perpendicular wavenumber.
+
+        Returns
+        -------
+        float
+            Maximum k_perp in Mpc^-1.
+        """
+        return 2 * np.pi * (D_max + L) / (r_z * wavelength)
 
 else:
     raise ValueError(f"Unknown array_type: {array_type}. Choose 'single' or 'double' or 'FarView'.")

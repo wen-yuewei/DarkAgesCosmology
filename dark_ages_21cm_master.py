@@ -306,6 +306,30 @@ def HI_power_spectrum_2D(k_perp_obs, k_para_obs, interp_lis_true,
 
 
 # ===================== Baseline distributions =======================
+def regular_polygon_distances(n, side):
+    """
+    Compute all distinct centre‑to‑centre distances for a regular n‑gon with side length `side`.
+    Returns a list of distances and their multiplicities.
+
+    side: meters
+    """
+    if n < 2:
+        return [], []  # no pairs
+    # Circumradius
+
+    R = side / (2 * np.sin(np.pi / n))
+    distances = []
+    multiplicities = []
+    for k in range(1, n // 2 + 1):
+        d = 2 * R * np.sin(np.pi * k / n)
+        if k == n / 2 and n % 2 == 0:
+            mult = n // 2
+        else:
+            mult = n
+        distances.append(d)
+        multiplicities.append(mult)
+    return distances, multiplicities
+
 def single_circular_pdf(d, D_min, D_max):
     """
     Probability density function w.r.t. baseline length for a single circular array.
@@ -360,219 +384,46 @@ def f_cross_length(d_grid, L, D_min, D_max, n_theta=1000):
         pdf_vals = single_circular_pdf(r, D_min, D_max)
         integrand_vals = np.where(r < 1e-12, 0.0, pdf_vals / (2 * np.pi * r))
         integral = simpson(integrand_vals, x=theta, axis=0)
-        return d_grid * integral
+        return d_grid * integral 
 
-if array_type == 'single':
-    # Baseline distribution for a single circular array
-    def nb_D_func(d, N, D_min, D_max):
-        """
-        Wrapper for the baseline density distribution function.
+# Read polygon parameters
+n_stations = int(n_stations)          # from params.ini
+side_len = float(L)         # from params.ini
 
-        Parameters
-        ----------
-        d : array_like
-            Baseline lengths in meters.
-        N : int
-            Number of antennas.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
+# Precompute unique distances and their multiplicities
+unique_Ls, mults = regular_polygon_distances(n_stations, side_len)
 
-        Returns
-        -------
-        array_like
-            Baseline density in units of m^-2.
-        """
-        total_baselines = N * (N - 1) / 2
-        radial_density = total_baselines * single_circular_pdf(d, D_min, D_max)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            uv_density = radial_density / (2 * np.pi * d)
-        uv_density[d == 0] = 0
-        return uv_density
+def nb_D_func(d, N, D_min, D_max):
+    d = np.asarray(d)
+    # Intra‑array part: each station contributes C(N,2) baselines
+    intra_radial = n_stations * (N * (N - 1) / 2) * single_circular_pdf(d, D_min, D_max)
 
-    def k_perp_max_func():
-        """
-        Maximum perpendicular wavenumber.
+    # Cross‑array part: sum over all unique distances with multiplicities
+    cross_radial = np.zeros_like(d)
 
-        Returns
-        -------
-        float
-            Maximum k_perp in Mpc^-1.
-        """
-        return 2 * np.pi * D_max / (r_z * wavelength)
+    for L_ij, m in zip(unique_Ls, mults):
+        cross_radial += m * (N ** 2) * f_cross_length(d, L_ij, D_min, D_max)
 
-elif array_type == 'double':
-    # Baseline distribution for the double-array scenario
-    def dN_intra_dd(d, N, D_min, D_max):
-        """
-        Intra-array baseline number density.
-
-        Parameters
-        ----------
-        d : array_like
-            Baseline lengths in meters.
-        N : int
-            Number of antennas in each circular array.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-
-        Returns
-        -------
-        array_like
-            Number density in m^-1.
-        """
-        total_intra = 2 * (N * (N - 1) / 2)
-        return total_intra * single_circular_pdf(d, D_min, D_max)
-
-    def dN_cross_dd(d, L, N, D_min, D_max):
-        """
-        Number density for cross-baselines
-
-        Parameters
-        ----------
-        d : array_like
-            Baseline lengths in meters.
-        L : float
-            Separation between array centers in meters.
-        N : int
-            Number of antennas per array.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-
-        Returns
-        -------
-        array_like
-            Number density of the given cross-baseline in m^-1.
-        """
-        condition = (d < abs(L - D_max)) | (d > L + D_max)
-        return np.where(condition, 0.0, N**2 * f_cross_length(d, L, D_min, D_max))
-
-    def nb_D_func(d, N, D_min, D_max):
-        """
-        Wrapper for the baseline density distribution function.
-
-        Parameters
-        ----------
-        d : array_like
-            Baseline lengths in meters.
-        N : int
-            Number of antennas per array.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-
-        Returns
-        -------
-        array_like
-            Number density of baselines of this length in m^-2.
-        """
-        epsilon = 1e-10 ## to avoid numerical errors for baseline lengths that are not probed
-        dN_tot = dN_intra_dd(d, N, D_min, D_max) + dN_cross_dd(d, L, N, D_min, D_max)
-        return epsilon + (1 / (2 * np.pi * d)) * dN_tot
-
-    def k_perp_max_func():
-        """
-        Maximum perpendicular wavenumber.
-
-        Returns
-        -------
-        float
-            Maximum k_perp in Mpc^-1.
-        """
-        return 2 * np.pi * (D_max + L) / (r_z * wavelength)
-    
-elif array_type == 'FarView':
-    ## Baseline distribution for the FarView/Farside configuration
-    def nb_D_FarView(D, N_ant, D_min, D_max):
-        """
-        Baseline number density following the FarView/FarSide fitting formula
-
-        Parameters
-        ----------
-        D : array_like
-            Baseline lengths in meters.
-        N_ant : int
-            Number of antennas.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-
-        Returns
-        -------
-        array_like
-            Number density of baselines of given length in units of m^-2.
-        """
-        integrand = lambda D: 2 * np.pi * D * (D - D0) ** 2 * np.exp(- ((D- D0) / w) ** 2)
-
-        int_res = quad(integrand, D_min, D_max)
-
-        A = (N_ant * (N_ant - 1) / 2) / int_res[0]
-
-        return A * (D - D0) ** 2 * np.exp(- ((D - D0) / w) ** 2)
-
-    def nb_D_func(d, N, D_min, D_max):
-        """
-        Wrapper for the baseline density distribution function.
-
-        Parameters
-        ----------
-        d : array_like
-            Baseline lengths in meters.
-        N : int
-            Number of antennas per array.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-
-        Returns
-        -------
-        array_like
-            Number density of baselines of this length in m^-2.
-        """
-        return nb_D_FarView(d, N, D_min, D_max)
-
-    def k_perp_max_func():
-        """
-        Maximum perpendicular wavenumber.
-
-        Returns
-        -------
-        float
-            Maximum k_perp in Mpc^-1.
-        """
-        return 2 * np.pi * D_max / (r_z * wavelength)
-    
-elif array_type == 'triple':
-    def nb_D_triple_analytical(d, N, D_min, D_max, L):
-        d = np.asarray(d)
-
-        # Intra‑array part: 3 stations * C(N,2) baselines each
-        intra_radial = 3 * (N * (N - 1) / 2) * single_circular_pdf(d, D_min, D_max)
-
-        # Cross‑array part: 3 station pairs * N^2 baselines each
-        # f_cross_length returns the radial density (in m^-1) for one pair
-        cross_radial = 3 * (N**2) * f_cross_length(d, L, D_min, D_max)
+    if n_stations == 1:
+        total_radial = intra_radial
+    else:
         total_radial = intra_radial + cross_radial
-        
-        # Convert to uv‑density (m^-2) as in nb_D_func for double array
-        with np.errstate(divide='ignore', invalid='ignore'):
-            uv_density = total_radial / (2 * np.pi * d)
-        uv_density[d == 0] = 0
-        
-        epsilon = 1e-10
-        return uv_density + epsilon ## m^-2
 
-    nb_D_func = lambda d, N, D_min, D_max: nb_D_triple_analytical(d, N, D_min, D_max, L)
-        
-    def k_perp_max_func():
-        """
-        Maximum perpendicular wavenumber.
+    # Convert to uv‑density (m⁻²) as required by the rest of the pipeline
+    with np.errstate(divide='ignore', invalid='ignore'):
+        uv_density = total_radial / (2 * np.pi * d)
+    uv_density[d == 0] = 0
+    epsilon = 1e-10
+    return uv_density + epsilon
 
-        Returns
-        -------
-        float
-            Maximum k_perp in Mpc^-1.
-        """
-        return 2 * np.pi * (D_max + L) / (r_z * wavelength)
-
-else:
-    raise ValueError(f"Unknown array_type: {array_type}. Choose 'single' or 'double' or 'FarView'.")
+def k_perp_max_func():
+    # Maximum baseline length = max station separation + D_max
+    if n_stations == 1:
+        max_baseline = D_max
+    else:
+        max_L = max(unique_Ls) if unique_Ls else 0.0
+        max_baseline = max(D_max, max_L + D_max)
+    return 2 * np.pi * max_baseline / (r_z * wavelength)
 
 
 # ======================= Power Spectrum Error ============================
@@ -895,13 +746,13 @@ def run():
             fisher_matrix[pix1, pix2] = entry
 
     ## same the Fisher matrix, power spectrum and error
-    np.savez(f'outputs_{array_type}_array.npz',
+    np.savez(f'outputs_{str(n_stations)}_array.npz',
              fisher=fisher_matrix,
              ps_21=PS_HI_2D_fid,
              ps_21_error=deltaPK,
              kperp=k_perp_vals,
              kpara=k_para_vals)
-    logging.info(f"Saved outputs to outputs_{array_type}_array.npz")
+    logging.info(f"Saved outputs to outputs_{str(n_stations)}_array.npz")
     
     ## Compute the covariance matrix and parameter constraint
     cov = np.linalg.inv(fisher_matrix)

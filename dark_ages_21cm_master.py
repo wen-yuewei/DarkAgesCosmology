@@ -820,8 +820,8 @@ def run():
              fisher=fisher_matrix,
              ps_21=PS_HI_2D_fid,
              ps_21_error=deltaPK,
-             kperp=k_perp_vals,
-             kpara=k_para_vals)
+             kperp=k_perp_all_edges,
+             kpara=k_para_all_edges)
     logging.info(f"Saved outputs to outputs_{str(n_stations)}_array.npz")
     
     ## Compute the covariance matrix and parameter constraint

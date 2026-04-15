@@ -6,7 +6,7 @@ Forecast of power spectrum measurement and cosmological constraints
 This code accompanies the paper:
     "A Designer’s Guide to Lunar Far-Side Interferometer Array: 
         Power Spectrum Measurement and Cosmological Constraints from the Dark Ages", 
-        Yuewei Wen and Xuelei Chen. (2026), Journal/arXiv:XXXX.XXXXX
+        Yuewei Wen et al. (2026), Journal/arXiv:XXXX.XXXXX
 """
 
 # ===================== import packages ========================
@@ -130,7 +130,7 @@ D_half_lambda = wavelength/2
 if D_min < D_half_lambda:
     logging.warning('D_min is smaller than half wavelength')
 
-t_tot = t_tot * 3600 ## convert from hours to seconds
+t_tot = t_tot * 3600 ## convert the total observation time from hours to seconds
 
 # ===================== get basic cosmological quantities ===================
 def get_basic_cosmology(fid_dict, z):
@@ -308,10 +308,21 @@ def HI_power_spectrum_2D(k_perp_obs, k_para_obs, interp_lis_true,
 # ===================== Baseline distributions =======================
 def regular_polygon_distances(n, side):
     """
-    Compute all distinct centre‑to‑centre distances for a regular n‑gon with side length `side`.
+    Compute all distinct vertex‑to‑vertex distances for a regular n‑gon with side length `side`.
     Returns a list of distances and their multiplicities.
 
-    side: meters
+    Parameters
+    ----------
+    n : int
+        Number of vertices of the regular n-gon
+    side : float
+        Side length of the regular n-gon
+
+    Returns
+    -------
+    distances, multiplicities : tuple(list[float], list[int])
+        First list contains distinct vertex-to-vertex distances
+        Second list contains the corresponding multiplicities.   
     """
     if n < 2:
         return [], []  # no pairs
@@ -358,33 +369,33 @@ def single_circular_pdf(d, D_min, D_max):
     return pdf
 
 def f_cross_length(d_grid, L, D_min, D_max, n_theta=1000):
-        """
-        Probability distribution for cross-baselines.
+    """
+    Probability distribution for cross-baselines.
 
-        Parameters
-        ----------
-        d_grid : array_like
-            Baseline lengths in meters
-        L : float
-            Separation between array centers in meters.
-        D_min, D_max : float
-            Minimum and maximum baseline lengths in meters.
-        n_theta : int, optional
-            Number of quadrature points for the numerical integration.
+    Parameters
+    ----------
+    d_grid : array_like
+        Baseline lengths in meters
+    L : float
+        Separation between array centers in meters.
+    D_min, D_max : float
+        Minimum and maximum baseline lengths in meters.
+    n_theta : int, optional
+        Number of quadrature points for the numerical integration.
 
-        Returns
-        -------
-        array_like
-            Probability w.r.t. a cross-baseline of this length.
-        """
-        theta = np.linspace(0, 2*np.pi, n_theta)
-        cos_theta = np.cos(theta).reshape(-1, 1, 1)
-        d_reshaped = d_grid.reshape(1, *d_grid.shape)
-        r = np.sqrt(d_reshaped**2 + L**2 - 2 * d_reshaped * L * cos_theta)
-        pdf_vals = single_circular_pdf(r, D_min, D_max)
-        integrand_vals = np.where(r < 1e-12, 0.0, pdf_vals / (2 * np.pi * r))
-        integral = simpson(integrand_vals, x=theta, axis=0)
-        return d_grid * integral 
+    Returns
+    -------
+    array_like
+        Probability w.r.t. a cross-baseline of this length.
+    """
+    theta = np.linspace(0, 2*np.pi, n_theta)
+    cos_theta = np.cos(theta).reshape(-1, 1, 1)
+    d_reshaped = d_grid.reshape(1, *d_grid.shape)
+    r = np.sqrt(d_reshaped**2 + L**2 - 2 * d_reshaped * L * cos_theta)
+    pdf_vals = single_circular_pdf(r, D_min, D_max)
+    integrand_vals = np.where(r < 1e-12, 0.0, pdf_vals / (2 * np.pi * r))
+    integral = simpson(integrand_vals, x=theta, axis=0)
+    return d_grid * integral 
 
 # Read polygon parameters
 n_stations = int(n_stations)          # from params.ini
@@ -394,6 +405,38 @@ side_len = float(L)         # from params.ini
 unique_Ls, mults = regular_polygon_distances(n_stations, side_len)
 
 def nb_D_func(d, N, D_min, D_max):
+    """
+    Compute the baseline density distribution (in unit of m^-2) for a multi‑station interferometer.
+
+    The distribution combines intra‑array baselines from each station and cross‑array baselines
+    between stations. For a single station, only the intra‑array contribution is used.
+
+    Parameters
+    ----------
+    d : array_like
+        Baseline lengths (in meters) at which to evaluate the density.
+    N : int
+        Number of antennas per station.
+    D_min : float
+        Minimum baseline length (in meters) for a single circular array.
+    D_max : float
+        Maximum baseline length (in meters) for a single circular array.
+
+    Returns
+    -------
+    ndarray
+        Baseline density in m⁻², with a small epsilon (1e‑10) added to avoid numerical issues.
+
+    Notes
+    -----
+    The function uses the following external variables (defined in the enclosing scope):
+        - n_stations : int
+            Total number of stations.
+        - unique_Ls : list of float
+            Distinct station‑to‑station distances (in meters).
+        - mults : list of int
+            Multiplicities of each distance in unique_Ls.
+    """
     d = np.asarray(d)
     # Intra‑array part: each station contributes C(N,2) baselines
     intra_radial = n_stations * (N * (N - 1) / 2) * single_circular_pdf(d, D_min, D_max)
@@ -417,7 +460,18 @@ def nb_D_func(d, N, D_min, D_max):
     return uv_density + epsilon
 
 def k_perp_max_func():
-    # Maximum baseline length = max station separation + D_max
+    """
+    Compute the maximum transverse wavenumber accessible to the interferometer.
+
+    The maximum baseline length is determined as:
+        - For a single station: the array diameter.
+        - For multiple stations: Diameter of a single array + the longest vertice-to-vertice distance
+
+    Returns
+    -------
+    float
+        Maximum transverse wavenumber in units of Mpc^-1.
+    """
     if n_stations == 1:
         max_baseline = D_max
     else:
@@ -466,10 +520,26 @@ k_perp_min = 2 * np.pi * D_min / (r_z * wavelength)
 k_perp_max = k_perp_max_func()
 
 def k_para_max():
+    """
+    Compute the maximum parallel wavenumber accessible to the survey.
+
+    Returns
+    -------
+    float
+        Maximum parallel wavenumber in units of Mpc^-1.
+    """
     freq_21 = (3e8 / 0.211) * 1e-6 ## MHz
     return  (freq_21/(channel_width * 1e-3)) * 2 * np.pi * H_z / (3e5 * (1+redshift) ** 2)
 
 def k_para_min():
+    """
+    Compute the minimum parallel wavenumber accessible to the survey.
+
+    Returns
+    -------
+    float
+        Minimum parallel wavenumber in units of Mpc^-1.
+    """
     bandwidth = freq * bandwidth_frac
     survey_depth_low = results.comoving_radial_distance(freq_to_z(freq + 0.5 * bandwidth))
     survey_depth_high = results.comoving_radial_distance(freq_to_z(freq - 0.5 * bandwidth))

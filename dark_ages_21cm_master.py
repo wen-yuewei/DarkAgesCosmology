@@ -341,6 +341,59 @@ def regular_polygon_distances(n, side):
         multiplicities.append(mult)
     return distances, multiplicities
 
+def compute_station_distances(layout_spec, n_stations_param, side_length=None):
+    """
+    Compute pairwise distances between station centres.
+
+    Parameters
+    ----------
+    layout_spec : str
+        'regular' or a filename containing x, y coordinates.
+    n_stations_param : int
+        Number of stations given in params.ini (used for regular polygon, ignored for file).
+    side_length : float, optional
+        Side length for regular polygon.
+
+    Returns
+    -------
+    unique_Ls : list
+        Unique centre‑to‑centre distances (metres).
+    mults : list
+        Multiplicities corresponding to unique_Ls.
+    max_dist : float
+        Maximum centre‑to‑centre distance.
+    n_actual : int
+        Actual number of stations to use (same as n_stations_param for regular, or from file).
+    """
+    if layout_spec.lower() == 'regular':
+        if n_stations_param == 1:
+            return [], [], 0.0, n_stations_param
+        distances, mults = regular_polygon_distances(n_stations_param, side_length)
+        max_dist = max(distances) if distances else 0.0
+        return distances, mults, max_dist, n_stations_param
+
+    # Read coordinates from file
+    coords = np.loadtxt(layout_spec, delimiter=',')
+    if coords.ndim == 1:
+        coords = coords.reshape(1, 2)
+    n_actual = coords.shape[0]
+
+    if n_actual != n_stations_param:
+        logging.warning(
+            f"Number of stations in file ({n_actual}) differs from n_stations in params.ini "
+            f"({n_stations_param}). Using file count ({n_actual})."
+        )
+
+    # Compute all pairwise Euclidean distances
+    dist_matrix = squareform(pdist(coords))
+    triu_indices = np.triu_indices_from(dist_matrix, k=1)
+    all_dists = dist_matrix[triu_indices]
+
+    unique_Ls, mults = np.unique(all_dists, return_counts=True)
+    max_dist = np.max(all_dists) if len(all_dists) > 0 else 0.0
+
+    return unique_Ls.tolist(), mults.tolist(), max_dist, n_actual
+
 def single_circular_pdf(d, D_min, D_max):
     """
     Probability density function w.r.t. baseline length for a single circular array.
@@ -397,12 +450,15 @@ def f_cross_length(d_grid, L, D_min, D_max, n_theta=1000):
     integral = simpson(integrand_vals, x=theta, axis=0)
     return d_grid * integral 
 
-# Read polygon parameters
-n_stations = int(n_stations)          # from params.ini
-side_len = float(L)         # from params.ini
 
-# Precompute unique distances and their multiplicities
-unique_Ls, mults = regular_polygon_distances(n_stations, side_len)
+# Compute station centre distances based on layout choice
+station_layout = PARAMS.get('station_layout', 'regular')
+side_len = float(PARAMS.get('L', 0.0))
+n_stations_param = int(PARAMS['n_stations'])   # from params.ini
+
+unique_Ls, mults, max_center_dist, n_stations = compute_station_distances(
+    station_layout, n_stations_param, side_len
+)
 
 def nb_D_func(d, N, D_min, D_max):
     """
@@ -462,21 +518,12 @@ def nb_D_func(d, N, D_min, D_max):
 def k_perp_max_func():
     """
     Compute the maximum transverse wavenumber accessible to the interferometer.
-
-    The maximum baseline length is determined as:
-        - For a single station: the array diameter.
-        - For multiple stations: Diameter of a single array + the longest vertice-to-vertice distance
-
-    Returns
-    -------
-    float
-        Maximum transverse wavenumber in units of Mpc^-1.
     """
     if n_stations == 1:
         max_baseline = D_max
     else:
-        max_L = max(unique_Ls) if unique_Ls else 0.0
-        max_baseline = max(D_max, max_L + D_max)
+        # max_center_dist comes from the global scope (computed above)
+        max_baseline = max(D_max, max_center_dist + D_max)
     return 2 * np.pi * max_baseline / (r_z * wavelength)
 
 

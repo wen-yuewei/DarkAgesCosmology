@@ -12,7 +12,7 @@ This repository provides the code associated with the paper:
 ## Features
 
 - **21‑cm power spectrum** – Computes the 2D power spectrum of the 21‑cm signal during the Dark Ages (z ≈ 30–200).
-- **Interferometer noise** – Fully general thermal noise modeling: any number of identical circular stations (from one to many) can be placed at vertices of a regular n-gon. 
+- **Interferometer noise** – Fully general thermal noise modeling: any number of identical circular stations (from one to many) can be placed at vertices of a regular or non-regular n-gon. 
 - **Cosmological forecasts** – Uses the Fisher matrix formalism to predict constraints on cosmological parameters (Ω<sub>b</sub>h², Ω<sub>c</sub>h², A<sub>s</sub>, n<sub>s</sub>, H<sub>0</sub>) and the running of the spectral index α<sub>s</sub>.
 
 ---
@@ -20,6 +20,7 @@ This repository provides the code associated with the paper:
 ## Structure
 - `dark_ages_21cm_master.py` – core calculations
 - `params.ini` – parameter file
+- `stations.txt` – coordinate file for multi-station configurations
 - `README.md` – documentation
 
 ---
@@ -40,7 +41,8 @@ This repository provides the code associated with the paper:
    git clone https://github.com/wen-yuewei/DarkAgesCosmology.git
    cd DarkAgesCosmology
 2. Edit `params.ini` to set your desired parameters.
-3. Run the master script `dark_ages_21cm_master.py`.
+3. Define the station coordinates in `stations.txt` (one (x, y) pair per line, in meters).
+4. Run the master script `dark_ages_21cm_master.py`.
 
 ---
 
@@ -48,10 +50,11 @@ This repository provides the code associated with the paper:
 
 The parameter file is divided into sections. The most important choices are:
 
-- **`n_stations`** – choose the number of stations/sub-arrays (from 1 to n).
+- **`station_layout`** – Defines station placement. Options: `"regular"` (vertices of a regular polygon with `n_stations` and side length `L`) or `"stations.txt"` (coordinates read from this self-designed file).
+- **`n_stations`** – choose the number of stations/sub-arrays (from 1 to n); only used when `station_layout`='regular'.
+- **`L`** – side length of the n-gon formed by stations/sub-arrays; only used when `n_stations` > 1 and `station_layout`='regular'.
 - **`D_min`**, **`D_max`** – minimum and maximum baseline length limits (in meters); when `n_stations` > 1, **`D_max`** refers to the diameter of each station/sub-array. 
 - **`N_antenna`** – number of antennas; for `n_stations` > 1, this is the number per array.
-- **`L`** – side length of the n-gon formed by stations/sub-arrays (only used when `n_stations` > 1).
 - **Cosmological parameters** – Planck 2018 best‑fit values are given as defaults.
 - **Survey parameters** – `t_tot`, `S_area`, etc., and k‑binning settings.
 

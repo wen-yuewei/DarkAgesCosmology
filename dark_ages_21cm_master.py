@@ -352,7 +352,7 @@ def compute_station_distances(layout_spec, n_stations_param, side_length=None):
     n_stations_param : int
         Number of stations given in params.ini (used for regular polygon, ignored for file).
     side_length : float, optional
-        Side length for regular polygon.
+        Side length for regular polygon (used for regular polygon, ignored for file).
 
     Returns
     -------
